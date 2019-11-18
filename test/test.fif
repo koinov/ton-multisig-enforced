@@ -62,7 +62,7 @@ now c7
 runvmctx <s .s
 
 rot constant test1
-."Initialization message                            :" test1 10 = { ."passed" cr } { ."failed" cr 1 halt } cond 
+// ."Initialization message                            :" test1 10 = { ."passed" cr } { ."failed" cr 1 halt } cond 
 
 
 "new.req1.boc" load_ext_req .s 

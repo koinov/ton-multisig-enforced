@@ -2,33 +2,35 @@
 
 _ unpack_state() inline_ref {
   var ds = begin_parse(get_data());
-  var res = (ds~load_uint(8), ds~load_uint(8), ds~load_uint(64), ds~load_dict(), ds~load_dict());
+  var res = (ds~load_uint(8), ds~load_uint(8), ds~load_uint(8), ds~load_uint(64), ds~load_dict(), ds~load_dict());
   ds.end_parse();
   return res;
 }
 
-_ pack_state(cell pending_queries, cell public_keys, int last_cleaned, int k, int n) inline_ref {
+_ pack_state(cell pending_queries, cell public_keys, int last_cleaned, int k, int n, int min_k) inline_ref {
   return begin_cell()
     .store_uint(n, 8)
     .store_uint(k, 8)
+    .store_uint(min_k, 8)
     .store_uint(last_cleaned, 64)
     .store_dict(public_keys)
     .store_dict(pending_queries)
   .end_cell();
 }
 
-(int, int) check_signatures(cell public_keys, cell signatures, int hash, int cnt_bits) inline_ref {
+(int, int) check_signatures(cell public_keys, cell signatures, int hash, int cnt_bits, int k_required) inline_ref {
   int cnt = 0;
-  
+  int accepted = 0;
+
   do {
     slice cs = signatures.begin_parse();
     slice signature = cs~load_bits(512);
-
     int i = cs~load_uint(8);
     signatures = cs~load_dict();
 
     (slice public_key, var found?) = public_keys.udict_get?(8, i);
     throw_unless(37, found?);
+    dump_stack();
     throw_unless(38, check_signature(hash, signature, public_key.preload_uint(256)));
 
     int mask = (1 << i);
@@ -36,6 +38,11 @@ _ pack_state(cell pending_queries, cell public_keys, int last_cleaned, int k, in
     cnt_bits |= mask;
     int should_check = cnt_bits != old_cnt_bits;
     cnt -= should_check;
+    ;; ACCEPT MESSAGE IF NUMBER OF SIGNATURES IS ENOUGH TO ACCEPT MESSAGE
+    if( (k_required != 0) & (cnt == k_required) & (accepted == 0)){
+      accept_message();
+      accepted = -1;
+    }
   } until (cell_null?(signatures));
 
   return (cnt, cnt_bits);
@@ -58,10 +65,10 @@ _ pack_state(cell pending_queries, cell public_keys, int last_cleaned, int k, in
 
 () try_init() impure inline_ref {
   ;; first query without signatures is always accepted
-  (int n, int k, int last_cleaned, cell public_keys, cell pending_queries) = unpack_state();
+  (int n, int k, int min_k, int last_cleaned, cell public_keys, cell pending_queries) = unpack_state();
   throw_if(37, last_cleaned);
   accept_message();
-  set_data(pack_state(pending_queries, public_keys, 1, k, n));
+  set_data(pack_state(pending_queries, public_keys, 1, k, n, min_k));
 }
 
 cell update_pending_queries(cell pending_queries, slice msg, int query_id, int cnt, int cnt_bits, int n, int k) impure inline_ref {
@@ -92,7 +99,7 @@ cell update_pending_queries(cell pending_queries, slice msg, int query_id, int c
   int root_hash = slice_hash(in_msg);
   int root_i = in_msg~load_uint(8);
 
-  (int n, int k, int last_cleaned, cell public_keys, cell pending_queries) = unpack_state();
+  (int n, int k, int min_k, int last_cleaned, cell public_keys, cell pending_queries) = unpack_state();
   last_cleaned -= last_cleaned == 0;
 
   (slice public_key, var found?) = public_keys.udict_get?(8, root_i);
@@ -110,23 +117,45 @@ cell update_pending_queries(cell pending_queries, slice msg, int query_id, int c
   (slice query, var found?) = pending_queries.udict_get?(64, query_id);
   (int cnt, int cnt_bits, slice msg) = unpack_query_data(in_msg, n, query, found?);
   int mask = 1 << root_i;
-  throw_if(34, cnt_bits & mask);
+  throw_if(34, cnt_bits & mask);  
   cnt_bits |= mask;
   cnt += 1;
 
+  ;; DO NOT ACCEPT MESSAGE WITH ROOT SIGNATURE ONLY
   ;; TODO: reserve some gas or FAIL
-  accept_message();
+  ;; accept_message();
 
-  pending_queries = update_pending_queries(pending_queries, msg, query_id, cnt, cnt_bits, n, k);
-  set_data(pack_state(pending_queries, public_keys, last_cleaned, k, n));
+  ;; pending_queries = update_pending_queries(pending_queries, msg, query_id, cnt, cnt_bits, n, k); 
+  ;; set_data(pack_state(pending_queries, public_keys, last_cleaned, k, n));
 
-  commit();
+  ;; commit();
   
   int need_save = 0;
-  ifnot (cell_null?(signatures) | (cnt >= k)) {
-    (int new_cnt, cnt_bits) = check_signatures(public_keys, signatures, hash, cnt_bits);
-    cnt += new_cnt;
+  
+  ;; DO NOT ACCEPT NEW REQUEST WITH ONE SIGNATURE  
+  throw_if( 40, (found? == 0) & cell_null?(signatures) ); 
+  throw_if( 41, cnt >= k ); 
+
+  var k_required = min_k - 1;
+  if( found? ){
     pending_queries = update_pending_queries(pending_queries, msg, query_id, cnt, cnt_bits, n, k);
+    set_data(pack_state(pending_queries, public_keys, last_cleaned, k, n, min_k));
+    accept_message();
+    commit();
+    k_required = 0;
+  }
+
+  ifnot (cell_null?(signatures) | (cnt >= k)) {
+    (int new_cnt, cnt_bits) = check_signatures(public_keys, signatures, hash, cnt_bits, k_required);
+    ;; DO NOT ACCEPT NEW REQUEST UNTIL MIN_K OF SIGNATURES ARE CONFIRMED
+    throw_unless(42, new_cnt >= k_required); 
+    cnt += new_cnt;
+    ;; COMMIT IF NEW REQUEST PASSED THE TEST 
+    if( found? == 0){
+      pending_queries = update_pending_queries(pending_queries, msg, query_id, cnt, cnt_bits, n, k);
+      set_data(pack_state(pending_queries, public_keys, last_cleaned, k, n, min_k));
+      commit();
+    }
     need_save = -1;
   }
 
@@ -146,14 +175,14 @@ cell update_pending_queries(cell pending_queries, slice msg, int query_id, int c
   } until (~ f);
 
   if (need_save) {
-    set_data(pack_state(pending_queries, public_keys, last_cleaned, k, n));
+    set_data(pack_state(pending_queries, public_keys, last_cleaned, k, n, min_k));
   }
 }
 
 ;; Get methods
 ;; returns -1 for processed queries, 0 for unprocessed, 1 for unknown (forgotten)
 (int, int) get_query_state(int query_id) method_id {
-  (int n, _, int last_cleaned, _, cell pending_queries) = unpack_state();
+  (int n, _, _, int last_cleaned, _, cell pending_queries) = unpack_state();
   (slice cs, var found) = pending_queries.udict_get?(64, query_id);
   if (found) {
     if (cs~load_int(1)) {
@@ -172,8 +201,8 @@ int processed?(int query_id) method_id {
   return x;
 }
 
-cell create_init_state(int n, int k, cell public_keys) method_id {
-  return pack_state(new_dict(), public_keys, 0, k, n);
+cell create_init_state(int n, int k, int min_k, cell public_keys) method_id {
+  return pack_state(new_dict(), public_keys, 0, k, n, min_k);
 }
 
 cell merge_list(cell a, cell b) {
@@ -196,7 +225,7 @@ cell merge_list(cell a, cell b) {
 }
 
 cell get_public_keys() method_id {
-  (_, _, _, cell public_keys, _) = unpack_state();
+  (_, _, _, _, cell public_keys, _) = unpack_state();
   return public_keys;
 }
 
@@ -205,10 +234,12 @@ cell get_public_keys() method_id {
   slice root_signature = cs~load_bits(512);
   int root_hash = slice_hash(cs);
   int root_i = cs~load_uint(8);
+  cs~dump();
 
   cell public_keys = get_public_keys();
   (slice public_key, var found?) = public_keys.udict_get?(8, root_i);
   throw_unless(31, found?);
+  dump_stack();
   throw_unless(32, check_signature(root_hash, root_signature, public_key.preload_uint(256)));
 
   int mask = 1 << root_i;
@@ -217,12 +248,13 @@ cell get_public_keys() method_id {
   if (cell_null?(signatures)) {
     return (1, mask);
   }
-  (int cnt, mask) = check_signatures(public_keys, signatures, slice_hash(cs), mask);
+  dump_stack();
+  (int cnt, mask) = check_signatures(public_keys, signatures, slice_hash(cs), mask, 0);
   return (cnt + 1, mask);
 }
 
 cell messages_by_mask(int mask) method_id {
-  (int n, _, _, _, cell pending_queries) = unpack_state();
+  (int n, _, _,_ , _, cell pending_queries) = unpack_state();
   int i = -1;
   cell a = new_dict();
   do {
@@ -248,9 +280,15 @@ cell get_messages_unsigned() method_id {
 }
 
 (int, int) get_n_k() method_id {
-  (int n, int k, _, _, _) = unpack_state();
+  (int n, int k, _, _, _, _) = unpack_state();
   return (n, k);
 }
+
+int get_min_k() method_id {
+  (_, _, int min_k, _, _, _) = unpack_state();
+  return min_k;
+}
+
 
 cell merge_inner_queries(cell a, cell b) method_id {
   slice ca = a.begin_parse();
