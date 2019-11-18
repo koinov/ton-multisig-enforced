@@ -1,0 +1,56 @@
+#!/usr/bin/env fift -s
+"TonUtil.fif" include
+"Asm.fif" include
+
+{ ."usage: " @' $0 type ." <workchain-id> <k> <n> <min_k> [<filename-base>]" cr
+  ."Creates a new wallet in specified workchain, for n public keys stored in files with the names <wallet-name>.pub[1..n]" cr
+  ."('new-multi-wallet.pub' name is set by default)" cr 1 halt
+} : usage 
+$# dup 4
+
+$1 parse-workchain-id =: wc    // set workchain id from command line argument
+def? $2 { $2 parse-int } { 2 } cond constant  k
+def? $3 { $3 parse-int } { 3 } cond constant  n
+def? $4 { $4 parse-int } { 2 } cond constant  min_k
+def? $5 { @' $5 } { "new-wallet" } cond constant wallet-name
+
+."Creating new wallet in workchain " wc . cr
+// Create new simple wallet
+// <{ 
+  "multisig-code.fif" include
+.s
+// }>c // >libref
+// code
+dictnew
+dictnew
+1 {  
+  dup wallet-name +".pub" swap (.) $+ file>B <b swap B, b> <s
+  swap 2 roll over 3 -roll 8
+  udict! drop swap
+  1+
+} n times drop
+// seqno, k, n, public keys dict
+<b n 8 i, k 8 i, min_k 8 i, 0 64 i, swap dict, swap dict, b> 
+
+dup 2 boc+>B dup Bx. cr
+wallet-name +"-state.boc" tuck B>file drop
+// 2dup ."StateInit0: " <s csr. cr
+null // no libraries
+.s
+<b b{0011} s, 3 roll ref, rot ref, swap dict, b>  // create StateInit
+.s
+dup ."StateInit: " <s csr. cr
+dup hash wc swap 2dup 2constant wallet_addr
+."new wallet address = " 2dup .addr cr
+2dup wallet-name +".addr" save-address-verbose
+."Non-bounceable address (for init): " 2dup 7 .Addr cr
+."Bounceable address (for later access): " 6 .Addr cr
+<b b>
+dup ."signing message: " <s csr. cr
+."Addr" wallet_addr 6 .Addr cr
+swap
+<b b{1000100} s, wallet_addr addr, b{000010} s, swap <s .s s, b{0} s, swap <s s, b>
+dup ."External message for initialization is " <s csr. cr
+2 boc+>B dup Bx. cr
+wallet-name +"-init.boc" tuck B>file
+."(Saved wallet creating query to file " type .")" cr

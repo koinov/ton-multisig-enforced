@@ -1,0 +1,17 @@
+#!/usr/bin/env fift -s
+"TonUtil.fif" include
+"Asm.fif" include
+
+{ ."usage: " @' $0 type ." <signature-index> [<wallet-name>]" cr
+  ."Generates keypair for the wallet with the name specified by <wallet-name> parameter" cr
+  ."('new-multi-wallet.pk' by default)" cr 1 halt
+} : usage 
+$# dup 
+
+$1 parse-int  =: signature-index
+def? $2 { @' $2 } { "new-multi-wallet" } cond constant wallet-name
+wallet-name +".pk" signature-index (.) $+ load-generate-keypair constant wallet_pk
+.s
+wallet_pk drop
+wallet-name +".pub" signature-index (.) $+ B>file
+

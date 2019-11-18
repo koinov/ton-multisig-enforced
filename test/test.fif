@@ -1,0 +1,133 @@
+#!/usr/bin/env fift -s
+"TonUtil.fif" include
+"Asm.fif" include
+
+
+{ 0 tuple 0x076ef1ea , // magic
+0 , 0 , // actions msg_sents
+swap , // unix_time
+1 , 1 , 0 , // block_lt, trans_lt, rand_seed
+ 0 tuple 9223372036854775807 , dictnew , , // remaining balance
+0 , dictnew , // contract_address, global_config
+1 tuple // wrap to another tuple
+} : c7
+
+{ file>B B>boc <s dup 1 swap ref@+ <s  swap  
+// code
+ref@+ <s  swap // state 
+ // message
+7 u@+ 8 u@+ 256 u@+ 5 u@+ 5 u@+  2 u@+ .s
+nip nip nip nip nip nip
+<b swap s, b> <s 
+-rot
+<b swap s, b> } : load_initial
+
+{ file>B B>boc <s 
+    7 u@+ 8 u@+ 256 u@+ 3 -roll -rot swap .s <b swap 7 u, swap 8 u, swap 256 u, b> swap 
+    ref@+ nip <s 
+    9 u@+ nip 8 u@+ nip 256 u@+ nip Gram@+ 107 u@+ nip
+    rot swap
+} : load_int_req
+
+{ file>B B>boc <s
+    7 u@+ 8 u@+ 256 u@+ Gram@+ 2 u@+ 
+    nip nip nip nip nip 
+} : load_ext_req
+
+
+"new-init.boc" load_initial
+
+constant state_0
+constant code
+constant init_msg
+
+
+init_msg
+-1 // recv_external
+code
+state_0
+now c7
+runvmctx .s <s .s
+
+dup 32 u@ constant test1
+<b swap s, b> constant state
+
+
+
+"new.req1.boc" load_ext_req .s s>c
+87157 // recv_external
+code
+state
+now c7
+runvmctx <s .s
+
+rot constant test1
+."Initialization message                            :" test1 10 = { ."passed" cr } { ."failed" cr 1 halt } cond 
+
+
+"new.req1.boc" load_ext_req .s 
+-1 // recv_external
+code
+state
+now c7
+runvmctx <s .s
+
+
+
+1 halt
+
+
+dup 32 u@ constant test2 
+<b swap s, b> constant state2
+
+"new.req1.boc" load_ext_req
+-1 // recv_external
+code
+state2
+now c7
+runvmctx <s .s
+swap constant test3
+
+"new.req2.boc1" load_ext_req
+-1 // recv_external
+code
+state2
+now c7
+runvmctx <s .s
+swap constant test4
+
+"new.req2.boc2" load_ext_req
+-1 // recv_external
+code
+state2
+now c7
+runvmctx <s .s
+swap constant test5
+
+"new.req2.boc3" load_ext_req
+-1 // recv_external
+code
+state2
+now c7
+runvmctx <s .s
+swap constant test6
+
+"new.req2.boc4" load_ext_req
+-1 // recv_external
+code
+state2
+now c7
+runvmctx <s .s
+swap constant test7
+dup 32 u@ constant test7_1
+
+
+."Initialization message                            :" test1 1 = { ."passed" cr } { ."failed" cr } cond 
+."Transfer (key1 + key2)                            :" test2 2 = { ."passed" cr } { ."failed" cr } cond 
+."Replay Transaction (key1 + key2)                  :" test3 33 = { ."passed" cr } { ."failed" cr } cond 
+."Insufficient signatures (key1)                    :" test4 34 = { ."passed" cr } { ."failed" cr } cond 
+."Wrong signatures (key1+key4)                      :" test5 34 = { ."passed" cr } { ."failed" cr } cond 
+."Replay attack with old signatures (key1+key2)     :" test6 34 = { ."passed" cr } { ."failed" cr } cond 
+."2 of 3 Valid signatures (key1+key3)               :" test7 0 = test7_1 3 = and  { ."passed" cr } { ."failed" cr } cond 
+
+

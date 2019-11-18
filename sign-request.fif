@@ -1,0 +1,21 @@
+#!/usr/bin/env fift -s
+"TonUtil.fif" include
+"Asm.fif" include
+
+{ ."usage: " @' $0 type ." <signature-index> <seq-no> [<wallet-name>]" cr
+  ."Signs request with <seqno> for the wallet with the name specified by <wallet-name> parameter" cr
+  ."('new-multi-wallet' by default)" cr 1 halt
+} : usage 
+$# dup 
+
+$1 parse-int  =: signature-index
+$2 parse-int  =: seqno
+def? $3 { @' $3 } { "new-multi-wallet" } cond constant wallet-name
+
+signature-index wallet-name +".pk" swap (.) $+ .s file>B 
+seqno wallet-name +".req" swap (.) $+ file>B B>boc 
+
+hash swap ed25519_sign_uint 
+// signature-index 8 u>B B+
+wallet-name +".req" seqno (.) $+ ".sign" $+ signature-index (.) $+ .s B>file
+

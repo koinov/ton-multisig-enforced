@@ -1,0 +1,50 @@
+#!/usr/bin/env fift -s
+"TonUtil.fif" include
+
+{ ."usage: " @' $0 type ." <wallet-name> <seqno> <dest-addr> <amount> <validity> [-B <message>]" cr
+  ."Creates a order for multi wallet created by manager-wallet.fif, with private key and its <seqno> " cr
+  ."loaded from file <wallet-name>.pk and address from <wallet-name>.addr " cr
+  .", and saves it into <wallet-name>.req<transaction-id>.boc " cr 
+  ."Message is loaded from file or used as a text if no file exists " cr 
+  ."Valididty is a period of time in seconds starting from the moment the oreder is created." cr 1 halt
+} : usage
+$# dup 5 < swap 7 > or ' usage if
+ 
+def? $6 { @' $6 "-B" $= { @' $7 =: body-boc-file [forget] $6 def? $7 { @' $7 =: $6 [forget] $6 } { [forget] $4 } cond
+  @' $# 2- =: $# } if } if
+
+true constant bounce
+
+3 constant send-mode
+
+$1 =: wallet-name
+$2 parse-int =: seqno
+$3 bounce parse-load-address =: bounce 2=: dest_addr
+$4 $>GR =: amount
+$5 parse-int =: validity
+
+
+
+
+
+wallet-name +".addr" load-address
+
+2dup 2constant wallet_addr
+."Source wallet address = " 2dup .addr cr 6 .Addr cr
+def? body-boc-file { body-boc-file file-exists? { @' body-boc-file file>B B>boc } { <b body-boc-file $, b> } cond } { <b "Empty" $, b> } cond
+constant body-cell
+.s
+."Transferring " amount .GR ."to account "
+dest_addr 2dup bounce 7 + .Addr ." = " .addr 
+."seqno=0x" seqno x. ."bounce=" bounce . cr
+."Body of transfer message is " body-cell <s csr. cr
+
+
+<b  b{01} s, bounce 1 i, b{000100} s, dest_addr addr, amount Gram, 0 9 64 32 + + 1+ u, 
+  body-cell <s 2dup s-fits? not rot over 1 i, -rot { drop body-cell ref, } { s, } cond 
+b>
+<b now validity 60 * + 32 << 64 u, send-mode 8 u, swap ref, b>
+
+2 boc+>B dup Bx. cr
+wallet-name +".req" seqno (.) $+ tuck B>file
+."(Saved to file " type .")" cr

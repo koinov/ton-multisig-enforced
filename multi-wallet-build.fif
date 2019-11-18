@@ -1,0 +1,68 @@
+#!/usr/bin/env fift -s
+"TonUtil.fif" include
+"Asm.fif" include
+
+{ ."usage: " @' $0 type ." <seq-no> <n> <signature-index> [<wallet-name>]" cr
+  ."Signs request with <seqno> for the wallet with the name specified by <wallet-name> parameter" cr
+  ."('new-multi-wallet' by default)" cr 1 halt
+} : usage 
+$# dup 
+
+$1 parse-int  =: seqno
+$2 parse-int  =: n
+$3 parse-int  =: signature-index
+def? $4 { @' $4 } { "new-multi-wallet" } cond constant wallet-name
+
+wallet-name +".addr" load-address
+2dup 2constant wallet_addr
+.s
+wallet-name +".req" seqno (.) $+ file>B B>boc 
+
+0
+1 {  
+  .s
+  wallet-name +".req" seqno (.) $+ over (.) ".sign" swap $+ $+ dup file-exists? { 
+  dup ."Signature found : " type cr
+  file>B over 8 u>B B+ 
+  rot
+  1 +
+  rot
+  .s
+  } {  
+  dup ."Signature not found : " type cr
+  drop
+  .s
+  
+  } cond
+  1+
+  .s
+} n times drop
+.s
+
+swap
+<b swap B, dictnew dict,
+swap
+{
+    ."Processing" cr
+    b> .s swap
+    <b swap B, swap dict, 
+} swap 1 -  times
+b>
+
+seqno wallet-name +".req" swap (.) $+ file>B B>boc <s
+swap
+<b signature-index 8 u, swap dict, swap s, b> dup 
+
+signature-index wallet-name +".pk" swap (.) $+ .s file>B 
+swap
+hash swap ed25519_sign_uint 
+
+<b swap B, swap <s s, b>
+
+.s
+
+<b b{1000100} s, wallet_addr addr, 0 Gram, b{00} s, swap <s s, b>
+
+2 boc+>B dup Bx. cr
+wallet-name +".req" seqno (.) $+  +".boc" 2dup B>file  // state
+."(Saved wallet request " type .")" cr
